@@ -3,7 +3,7 @@ $ = null
 
 MouseEventWhichDict = {"left click": 1, "middle click": 2, "right click": 3}
 module.exports =
-  disposable: null
+  disposables: new CompositeDisposable()
 
   config:
     disableComplete:
@@ -50,10 +50,10 @@ module.exports =
     @ctagsCache.activate()
 
     @ctagsCache.initTags(atom.project.getPaths(), atom.config.get('atom-ctags.autoBuildTagsWhenActive'))
-    @disposable = atom.project.onDidChangePaths (paths)=>
+    @disposables.add atom.project.onDidChangePaths (paths)=>
       @ctagsCache.initTags(paths, atom.config.get('atom-ctags.autoBuildTagsWhenActive'))
 
-    atom.commands.add 'atom-workspace', 'atom-ctags:rebuild', (e, cmdArgs)=>
+    @disposables.add atom.commands.add 'atom-workspace', 'atom-ctags:rebuild', (e, cmdArgs)=>
       console.error "rebuild: ", e
       @ctagsCache.cmdArgs = cmdArgs if Array.isArray(cmdArgs)
       @createFileView().rebuild(true)
@@ -61,15 +61,15 @@ module.exports =
         clearTimeout(t)
         t = null
 
-    atom.commands.add 'atom-workspace', 'atom-ctags:toggle-project-symbols', =>
+    @disposables.add atom.commands.add 'atom-workspace', 'atom-ctags:toggle-project-symbols', =>
       @createFileView().toggleAll()
 
-    atom.commands.add 'atom-text-editor',
+    @disposables.add atom.commands.add 'atom-text-editor',
       'atom-ctags:toggle-file-symbols': => @createFileView().toggle()
       'atom-ctags:go-to-declaration': => @createFileView().goto()
       'atom-ctags:return-from-declaration': => @createGoBackView().toggle()
 
-    atom.workspace.observeTextEditors (editor) =>
+    @disposables.add atom.workspace.observeTextEditors (editor) =>
       editorView = atom.views.getView(editor)
       {$} = require 'atom-space-pen-views' unless $
       $(editorView).on 'mousedown', (event) =>
@@ -85,12 +85,12 @@ module.exports =
               atom-ctags replaces and enhances the symbols-view package.
               Therefore, symbols-view has been disabled."
 
-    atom.config.observe 'atom-ctags.disableComplete', =>
+    @disposables.add atom.config.observe 'atom-ctags.disableComplete', =>
       return unless @provider
       @provider.disabled = atom.config.get('atom-ctags.disableComplete')
 
     initExtraTagsTime = null
-    atom.config.observe 'atom-ctags.extraTagFiles', =>
+    @disposables.add atom.config.observe 'atom-ctags.extraTagFiles', =>
       clearTimeout initExtraTagsTime if initExtraTagsTime
       initExtraTagsTime = setTimeout((=>
         @ctagsCache.initExtraTags(atom.config.get('atom-ctags.extraTagFiles').split(" "))
@@ -98,9 +98,6 @@ module.exports =
       ), 1000)
 
   deactivate: ->
-    if @disposable?
-      @disposable.dispose()
-      @disposable = null
 
     if @fileView?
       @fileView.destroy()
@@ -119,6 +116,7 @@ module.exports =
       @goBackView = null
 
     @ctagsCache.deactivate()
+    @disposables.dispose()
 
   createFileView: ->
     unless @fileView?
@@ -140,3 +138,18 @@ module.exports =
       @provider.ctagsCache = @ctagsCache
       @provider.disabled = atom.config.get('atom-ctags.disableComplete')
     @provider
+
+  # Docs: https://github.com/facebook-atom/atom-ide-ui/tree/master/modules/atom-ide-ui/pkg/hyperclick
+  provideHyperclick: ->
+    return
+      # Provide for all grammars
+      #grammarScopes: ...
+      # Be lowest priority, so that more specific hyperclick providers can override us
+      priority: -1
+      # TODO Is hyperclick's wordAtPosition more robust than our own FileView.getCurSymbol? Consider replacing ours if so.
+      getSuggestionForWord: (editor, text, range) =>
+        return
+          # Underline this range on cmd-hover, as a visual cue for clicking
+          range: range
+          # On cmd-click
+          callback: () => @createFileView().gotoSymbol(text)

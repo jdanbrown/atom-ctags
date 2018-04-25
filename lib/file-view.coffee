@@ -1,3 +1,4 @@
+{CompositeDisposable} = require 'atom'
 {$$} = require 'atom-space-pen-views'
 SymbolsView = require './symbols-view'
 
@@ -6,19 +7,21 @@ class FileView extends SymbolsView
   initialize: ->
     super
 
-    @editorsSubscription = atom.workspace.observeTextEditors (editor) =>
-      disposable = editor.onDidSave =>
+    @disposables = new CompositeDisposable()
+
+    @disposables.add atom.workspace.observeTextEditors (editor) =>
+      @disposables.add editor.onDidSave =>
         f = editor.getPath()
         return unless atom.project.contains(f)
         @ctagsCache.generateTags(f, true)
 
-      editor.onDidDestroy -> disposable.dispose()
-
   destroy: ->
-    @editorsSubscription.dispose()
+    @disposables.dispose()
     super
 
-  viewForItem: ({lineNumber, name, file, pattern}) ->
+  getFilterKey: -> 'filterKey'
+
+  viewForItem: ({lineNumber, name, relFile, pattern}) ->
     $$ ->
       @li class: 'two-lines', =>
         @div class: 'primary-line', =>
@@ -27,7 +30,7 @@ class FileView extends SymbolsView
 
         @div class: 'secondary-line', =>
           @span "Line: #{lineNumber}", class: 'pull-left'
-          @span file, class: 'pull-right'
+          @span relFile, class: 'pull-right'
 
   toggle: ->
     if @panel.isVisible()
@@ -95,14 +98,18 @@ class FileView extends SymbolsView
     if not symbol
       console.error "[atom-ctags:goto] failed getCurSymbol"
       return
+    @gotoSymbol(symbol)
 
+  gotoSymbol: (symbol) ->
     tags = @ctagsCache.findTags(symbol)
-
     if tags.length is 1
       @openTag(tags[0])
     else
       @setItems(tags)
-      @attach()
+      # @attach() works without a setTimeout when go-to-declaration is invoked by key command, but it fails (i.e.
+      # appears to do nothing) when invoked by a mousedown event or hyperclick provider. Adding the setTimeout(..., 0)
+      # makes all 3 cases work.
+      setTimeout((=> @attach()), 0)
 
   populate: (filePath) ->
     @list.empty()
